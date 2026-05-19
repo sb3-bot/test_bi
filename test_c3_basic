@@ -1,0 +1,99 @@
+//C# script basic
+// Paste your Excel data between the quotes below. 
+// Expects two columns copied directly from Excel: Table Name and Column Name.
+string excelData = @"
+
+";
+
+// Track the number of successful deletions for the final summary message.
+int deletedCount = 0;
+
+// Keep a list of any rows that fail so we can report them at the end without stopping the script.
+List<string> errors = new List<string>();
+
+// Normalize line endings to ensure compatibility whether the string came from Windows (\r\n) or Mac/Linux (\n).
+// Then, split the string into an array of lines, completely ignoring any blank lines.
+var lines = excelData
+    .Replace("\r\n", "\n")
+    .Replace('\r', '\n')
+    .Split(new[] { '\n' }, StringSplitOptions.RemoveEmptyEntries);
+
+// Loop through each line of the provided text data
+foreach (var rawLine in lines)
+{
+    // Remove leading and trailing whitespace
+    var line = rawLine.Trim();
+    
+    // Skip the line entirely if it is blank
+    if (string.IsNullOrWhiteSpace(line))
+        continue;
+
+    string[] parts;
+    
+    // Check if the copied data uses tabs (standard behavior when copying cells from Excel)
+    if (line.Contains('\t'))
+    {
+        parts = line.Split(new[] { '\t' }, StringSplitOptions.RemoveEmptyEntries);
+    }
+    else
+    {
+        // Fallback: If there are no tabs, split by any whitespace characters. 
+        // Note: This fallback might fail if your table or column names contain spaces!
+        parts = line.Split((char[])null, StringSplitOptions.RemoveEmptyEntries);
+    }
+
+    // Ensure the line has at least two elements (Table Name and Column Name)
+    if (parts.Length < 2)
+    {
+        errors.Add("Invalid line (need at least table and column): " + line);
+        continue; // Skip to the next line
+    }
+
+    // Extract the table and column names
+    string tableName = parts[0].Trim();
+    string columnName = parts[1].Trim();
+
+    // Skip the header row if the user accidentally copied the column headers from Excel
+    if (tableName.Equals("Table Name", StringComparison.OrdinalIgnoreCase))
+        continue;
+
+    // Validate that the Table exists in the Tabular Model
+    if (!Model.Tables.Contains(tableName))
+    {
+        errors.Add("Table not found: " + tableName);
+        continue;
+    }
+    
+    var table = Model.Tables[tableName];
+    
+    // Validate that the Column exists within that specific Table
+    if (!table.Columns.Contains(columnName))
+    {
+        errors.Add("Column not found: " + tableName + "[" + columnName + "]");
+        continue;
+    }
+
+    // If both exist, delete the column from the model and increment our success counter
+    table.Columns[columnName].Delete();
+    deletedCount++;
+}
+
+// Build the final summary message to display to the user
+string finalMessage = string.Format("Process complete!\nSuccessfully deleted {0} columns.\n\n", deletedCount);
+
+// If any errors were logged during the loop, append them to the message
+if (errors.Count > 0)
+{
+    finalMessage += string.Format("Could not find {0} items (they may already be deleted or contain typos):\n", errors.Count);
+    
+    // Only show the first 10 errors to avoid creating a massive, unreadable pop-up window
+    finalMessage += string.Join("\n", errors.Take(10));
+    
+    if (errors.Count > 10)
+    {
+        finalMessage += "\n...and more.";
+    }
+}
+
+// Display the final output in the Tabular Editor UI
+Info(finalMessage);
