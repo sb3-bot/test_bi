@@ -1,0 +1,105 @@
+//C# script
+// Paste your Excel data between the quotes below. 
+string excelData = @"
+
+";
+
+int deletedCount = 0;
+
+// OPTIMIZATION: Categorize errors so the final message is easier to read
+var tableErrors = new List<string>();
+var columnErrors = new List<string>();
+var formatErrors = new List<string>();
+
+var lines = excelData
+    .Replace("\r\n", "\n")
+    .Replace('\r', '\n')
+    .Split(new[] { '\n' }, StringSplitOptions.RemoveEmptyEntries);
+
+foreach (var rawLine in lines)
+{
+    var line = rawLine.Trim();
+    if (string.IsNullOrWhiteSpace(line)) continue;
+
+    // OPTIMIZATION: Inline the separator logic
+    char[] separators = line.Contains('\t') ? new[] { '\t' } : null;
+    string[] parts = line.Split(separators, StringSplitOptions.RemoveEmptyEntries);
+
+    if (parts.Length < 2)
+    {
+        formatErrors.Add(line);
+        continue;
+    }
+
+    string tableName = parts[0].Trim();
+    string columnName = parts[1].Trim();
+
+    if (tableName.Equals("Table Name", StringComparison.OrdinalIgnoreCase)) continue;
+
+    // Check if table exists
+    if (!Model.Tables.Contains(tableName))
+    {
+        tableErrors.Add(tableName);
+        continue;
+    }
+    
+    var table = Model.Tables[tableName];
+    
+    // Check if column exists
+    if (!table.Columns.Contains(columnName))
+    {
+        // OPTIMIZATION: Use string interpolation ($"") for cleaner code
+        columnErrors.Add($"'{tableName}'[{columnName}]");
+        continue;
+    }
+
+    // Delete column
+    table.Columns[columnName].Delete();
+    deletedCount++;
+}
+
+// ---------------------------------------------------------
+// BUILD INTUITIVE FINAL MESSAGE
+// ---------------------------------------------------------
+// OPTIMIZATION: Use StringBuilder for clean, efficient text formatting
+var sb = new System.Text.StringBuilder();
+
+// Add visual icons for quick reading
+sb.AppendLine("✅ Process Complete!");
+sb.AppendLine($"Successfully deleted {deletedCount} columns.\n");
+
+int totalErrors = formatErrors.Count + tableErrors.Count + columnErrors.Count;
+
+if (totalErrors > 0)
+{
+    sb.AppendLine($"⚠️ Could not process {totalErrors} items:");
+    
+    // Group 1: Missing Tables
+    if (tableErrors.Count > 0)
+    {
+        // Use .Distinct() so if a missing table has 20 columns, it only prints the table name once
+        var uniqueTableErrors = tableErrors.Distinct().ToList();
+        sb.AppendLine($"\n➤ Tables not found ({uniqueTableErrors.Count}):");
+        foreach (var t in uniqueTableErrors.Take(5)) sb.AppendLine($"   - {t}");
+        if (uniqueTableErrors.Count > 5) sb.AppendLine("   ...and more");
+    }
+
+    // Group 2: Missing Columns
+    if (columnErrors.Count > 0)
+    {
+        sb.AppendLine($"\n➤ Columns not found ({columnErrors.Count}):");
+        foreach (var c in columnErrors.Take(10)) sb.AppendLine($"   - {c}");
+        if (columnErrors.Count > 10) sb.AppendLine("   ...and more");
+    }
+
+    // Group 3: Formatting Errors
+    if (formatErrors.Count > 0)
+    {
+        sb.AppendLine($"\n➤ Invalid row formats ({formatErrors.Count}):");
+        foreach (var f in formatErrors.Take(3)) sb.AppendLine($"   - {f}");
+        if (formatErrors.Count > 3) sb.AppendLine("   ...and more");
+    }
+}
+
+// Display output
+Info(sb.ToString());
