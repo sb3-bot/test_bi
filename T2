@@ -1,0 +1,81 @@
+let
+    // 1. Data Loading & Formatting
+    Source = Excel.Workbook(File.Contents("path"), null, true),
+    IndividualAccessReport_Sheet = Source{[Item="Report",Kind="Sheet"]}[Data],
+    #"Promoted Headers" = Table.PromoteHeaders(IndividualAccessReport_Sheet, [PromoteAllScalars=true]),
+    #"Changed Type" = Table.TransformColumnTypes(#"Promoted Headers", {
+        {"Employee ID", type text}, 
+        {"Reader Name", type text}, 
+        {"Event Time", type datetime}, 
+        {"Employee Name", type text}
+    }),
+
+    // 2. Filter out Admin and Server rooms
+    #"Filtered Rooms" = Table.SelectRows(#"Changed Type", each 
+        ([Reader Name] <> "26TH_FLR_MAIN DOOR ENTRANCE" and 
+         [Reader Name] <> "26TH_FLR_SERVER ROOM" and 
+         [Reader Name] <> "27TH_FLR_ADMIN_DOOR" and 
+         [Reader Name] <> "27TH_FLR_COMMAND_CENTERDOOR" and 
+         [Reader Name] <> "27TH_FLR_MAIN_DOOR_ENTRANCE" and 
+         [Reader Name] <> "27TH_FLR_SERVER ROOM")
+    ),
+
+    // ----------------------------------------------------------------------
+    // NEW: Sort by Employee, then chronologically. This is mandatory so 
+    // we don't accidentally look at a different employee's timeline.
+    // ----------------------------------------------------------------------
+    #"Sorted Rows" = Table.Sort(#"Filtered Rooms",{
+        {"Employee ID", Order.Ascending}, 
+        {"Event Time", Order.Ascending}
+    }),
+
+    // 3. Buffer and Index the raw timeline
+    BufferedRaw = Table.Buffer(#"Sorted Rows"),
+    #"Added Raw Index" = Table.AddIndexColumn(BufferedRaw, "RawIndex", 0, 1, Int64.Type),
+
+    // 4. Identify previous status (With Employee ID safety check)
+    #"Added PrevStatus" = Table.AddColumn(#"Added Raw Index", "PrevStatus", 
+        each try (
+            if BufferedRaw[Employee ID]{[RawIndex]-1} = [Employee ID] 
+            then BufferedRaw[Reader Name]{[RawIndex]-1} 
+            else null
+        ) otherwise null
+    ),
+
+    // 5. Remove consecutive duplicate swipes at the same door
+    #"Filtered Dupes" = Table.SelectRows(#"Added PrevStatus", each [Reader Name] <> [PrevStatus]),
+
+    // ----------------------------------------------------------------------
+    // NEW: Re-Buffer and Re-Index the CLEAN data. This ensures NextTime 
+    // calculates the time until the next DIFFERENT door, ignoring dupes.
+    // ----------------------------------------------------------------------
+    BufferedClean = Table.Buffer(#"Filtered Dupes"),
+    #"Added Clean Index" = Table.AddIndexColumn(BufferedClean, "CleanIndex", 0, 1, Int64.Type),
+
+    // 6. Identify the next valid timestamp (With Employee ID safety check)
+    #"Added NextTime" = Table.AddColumn(#"Added Clean Index", "NextTime", 
+        each try (
+            if BufferedClean[Employee ID]{[CleanIndex]+1} = [Employee ID] 
+            then BufferedClean[Event Time]{[CleanIndex]+1} 
+            else null
+        ) otherwise null
+    ),
+
+    // 7. Calculate time spent inside
+    #"Added Duration" = Table.AddColumn(#"Added NextTime", "Duration", each [NextTime] - [Event Time]),
+
+    // 8. Keep only the Entry Barrier records
+    #"Filtered Entries" = Table.SelectRows(#"Added Duration", each 
+        ([Reader Name] = "26TH_FLR_FLAP BARRIER 1_ENTRY" or 
+         [Reader Name] = "26TH_FLR_FLAP BARRIER 2_ENTRY" or 
+         [Reader Name] = "27TH_FLR_FLAP BARRIER 1 ENTRY" or 
+         [Reader Name] = "27TH_FLR_FLAP BARRIER 2 ENTRY")
+    ),
+
+    // 9. Final formatting and cleanup of our temporary index columns
+    #"Calculated Total Minutes" = Table.TransformColumns(#"Filtered Entries", {{"Duration", Duration.TotalMinutes, type number}}),
+    #"Inserted Date" = Table.AddColumn(#"Calculated Total Minutes", "Date", each DateTime.Date([Event Time]), type date),
+    #"Removed Indices" = Table.RemoveColumns(#"Inserted Date", {"RawIndex", "CleanIndex"})
+
+in
+    #"Removed Indices"
