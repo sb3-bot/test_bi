@@ -1,4 +1,66 @@
 WITH FilteredRows AS (
+    SELECT 
+        CAST(Employee_ID AS VARCHAR(255)) AS Employee_ID,
+        CAST(Reader_Name AS VARCHAR(255)) AS Reader_Name,
+        Event_Time,
+        CAST(Employee_Name AS VARCHAR(255)) AS Employee_Name
+    FROM YourTableName
+    WHERE CAST(Reader_Name AS VARCHAR(255)) NOT IN (
+        '26TH_FLR_MAIN DOOR ENTRANCE',
+        '26TH_FLR_SERVER ROOM',
+        '27TH_FLR_ADMIN_DOOR',
+        '27TH_FLR_COMMAND_CENTERDOOR',
+        '27TH_FLR_MAIN_DOOR_ENTRANCE',
+        '27TH_FLR_SERVER ROOM'
+    )
+),
+AddedIndexAndWindowCalcs AS (
+    SELECT 
+        Employee_ID,
+        Reader_Name,
+        Event_Time,
+        Employee_Name,
+        ROW_NUMBER() OVER(PARTITION BY Employee_ID ORDER BY Event_Time) - 1 AS [Index],
+        LAG(Reader_Name) OVER (PARTITION BY Employee_ID ORDER BY Event_Time) AS PrevStatus,
+        LEAD(Event_Time) OVER (PARTITION BY Employee_ID ORDER BY Event_Time) AS NextTime
+    FROM FilteredRows
+),
+AddedStatus AS (
+    SELECT 
+        *,
+        CASE 
+            WHEN Reader_Name = PrevStatus THEN NULL 
+            ELSE Reader_Name 
+        END AS Status
+    FROM AddedIndexAndWindowCalcs
+),
+RemovedConsecutiveDuplicates AS (
+    SELECT *
+    FROM AddedStatus
+    WHERE Status IS NOT NULL
+)
+SELECT 
+    Employee_ID,
+    Reader_Name,
+    Event_Time,
+    Employee_Name,
+    [Index],
+    PrevStatus,
+    Status,
+    NextTime,
+    CAST(DATEDIFF(SECOND, Event_Time, NextTime) / 60.0 AS FLOAT) AS Duration,
+    CAST(Event_Time AS DATE) AS [Date]
+FROM RemovedConsecutiveDuplicates
+WHERE Reader_Name IN (
+    '26TH_FLR_FLAP BARRIER 1_ENTRY',
+    '26TH_FLR_FLAP BARRIER 2_ENTRY',
+    '27TH_FLR_FLAP BARRIER 1 ENTRY',
+    '27TH_FLR_FLAP BARRIER 2 ENTRY'
+);
+
+
+=============================================================================================
+WITH FilteredRows AS (
     -- Equivalent to: #"Filtered Rows"
     SELECT 
         [Employee ID],
