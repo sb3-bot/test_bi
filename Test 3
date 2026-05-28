@@ -1,0 +1,76 @@
+WITH FilteredRows AS (
+    -- Equivalent to: #"Filtered Rows"
+    SELECT 
+        [Employee ID],
+        [Reader Name],
+        [Event Time],
+        [Employee Name]
+    FROM YourTableName
+    WHERE [Reader Name] NOT IN (
+        '26TH_FLR_MAIN DOOR ENTRANCE',
+        '26TH_FLR_SERVER ROOM',
+        '27TH_FLR_ADMIN_DOOR',
+        '27TH_FLR_COMMAND_CENTERDOOR',
+        '27TH_FLR_MAIN_DOOR_ENTRANCE',
+        '27TH_FLR_SERVER ROOM'
+    )
+),
+AddedIndexAndWindowCalcs AS (
+    -- Equivalent to: #"Added Index", #"Added Custom" (PrevStatus), and #"Added Custom2" (NextTime)
+    -- We calculate Previous Status and Next Time BEFORE filtering out duplicates to match your M code logic.
+    SELECT 
+        [Employee ID],
+        [Reader Name],
+        [Event Time],
+        [Employee Name],
+        
+        -- Mimics Power Query's 0-based Index. 
+        -- (Partitioned by Employee ID to ensure accurate tracking per person)
+        ROW_NUMBER() OVER(PARTITION BY [Employee ID] ORDER BY [Event Time]) - 1 AS [Index],
+        
+        -- Mimics grabbing row at [Index]-1
+        LAG([Reader Name]) OVER (PARTITION BY [Employee ID] ORDER BY [Event Time]) AS PrevStatus,
+        
+        -- Mimics grabbing row at [Index]+1 from the pre-filtered table
+        LEAD([Event Time]) OVER (PARTITION BY [Employee ID] ORDER BY [Event Time]) AS NextTime
+    FROM FilteredRows
+),
+AddedStatus AS (
+    -- Equivalent to: #"Added Custom1" (Status)
+    SELECT 
+        *,
+        CASE 
+            WHEN [Reader Name] = PrevStatus THEN NULL 
+            ELSE [Reader Name] 
+        END AS Status
+    FROM AddedIndexAndWindowCalcs
+),
+RemovedConsecutiveDuplicates AS (
+    -- Equivalent to: #"Filtered Rows1" (Remove null Status)
+    SELECT *
+    FROM AddedStatus
+    WHERE Status IS NOT NULL
+)
+-- Equivalent to: #"Added Custom3", #"Filtered Rows2", #"Calculated Total Minutes", #"Inserted Date"
+SELECT 
+    [Employee ID],
+    [Reader Name],
+    [Event Time],
+    [Employee Name],
+    [Index],
+    PrevStatus,
+    Status,
+    NextTime,
+    
+    -- Duration in exact decimal minutes
+    CAST(DATEDIFF(SECOND, [Event Time], NextTime) / 60.0 AS FLOAT) AS Duration,
+    
+    -- Date extracted from Event Time
+    CAST([Event Time] AS DATE) AS [Date]
+FROM RemovedConsecutiveDuplicates
+WHERE [Reader Name] IN (
+    '26TH_FLR_FLAP BARRIER 1_ENTRY',
+    '26TH_FLR_FLAP BARRIER 2_ENTRY',
+    '27TH_FLR_FLAP BARRIER 1 ENTRY',
+    '27TH_FLR_FLAP BARRIER 2 ENTRY'
+);
