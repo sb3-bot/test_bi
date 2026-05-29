@@ -48,7 +48,10 @@ SELECT
     PrevStatus,
     Status,
     NextTime,
-    CAST(DATEDIFF(SECOND, Event_Time, NextTime) / 60.0 AS FLOAT) AS Duration,
+    --Older Version--CAST(DATEDIFF(SECOND, Event_Time, NextTime) / 60.0 AS FLOAT) AS Duration,
+    -- UPDATED EXACT PRECISION MATH:
+    -- Calculates exact milliseconds, divides by 60,000 to get minutes, and locks it to 4 decimal places
+    CAST(DATEDIFF(MILLISECOND, Event_Time, NextTime) / 60000.0 AS DECIMAL(18, 4)) AS Duration,
     CAST(Event_Time AS DATE) AS [Date]
 FROM RemovedConsecutiveDuplicates
 WHERE Reader_Name IN (
